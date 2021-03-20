@@ -12,16 +12,21 @@ library(leaflet.extras)
 library(shinythemes)
 library(plotly)
 
-
+# Read in data
 data<-read.csv("311data.csv")
+
+## Read in shape of police zone from API
 police_zone<-readOGR("https://services1.arcgis.com/YZCmUqbcsUpOKfj7/arcgis/rest/services/PGHWebPoliceZones/FeatureServer/0/query?where=1%3D1&objectIds=&time=&geometry=&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&resultType=none&distance=0.0&units=esriSRUnit_Meter&returnGeodetic=false&outFields=&returnGeometry=true&returnCentroid=false&featureEncoding=esriDefault&multipatchOption=xyFootprint&maxAllowableOffset=&geometryPrecision=&outSR=&datumTransformation=&applyVCSProjection=false&returnIdsOnly=false&returnUniqueIdsOnly=false&returnCountOnly=false&returnExtentOnly=false&returnQueryGeometry=false&returnDistinctValues=false&cacheHint=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&having=&resultOffset=&resultRecordCount=&returnZ=false&returnM=false&returnExceededLimitFeatures=true&quantizationParameters=&sqlFormat=none&f=pgeojson&token=")
 data$date<-as.Date(data$date)
 data$weekday<-weekdays(data$date)
 
+## Aggregate data for chart visualization
 data_agg<-data
 setDT(data_agg)
 data_agg=data_agg[,c("REQUEST_ORIGIN","weekday")]
 data_agg=data_agg[,.N,by=.(weekday,REQUEST_ORIGIN)]
+
+
 ui <- navbarPage("Pittsburgh Emergency Request Analysis",
                  theme = shinytheme("united"),
                  tabPanel("Map",
@@ -37,10 +42,7 @@ ui <- navbarPage("Pittsburgh Emergency Request Analysis",
                             ),
                             # Map Panel
                             mainPanel(
-                              # Using Shiny JS
-                              #shinyjs::useShinyjs(),
-                              # Style the background and change the page
-                              
+                              tags$style(type = "text/css", "#leaflet {height: calc(100vh - 80px) !important;}"),
                               # Map Page
                               leafletOutput("leaflet")
                             )
@@ -55,7 +57,7 @@ ui <- navbarPage("Pittsburgh Emergency Request Analysis",
                           
                  ),
                  
-                 tabPanel("Lineplot for Emergency Type",
+                 tabPanel("Barplot for Emergency Type",
                           sidebarLayout(
                             sidebarPanel(
                               selectInput(
@@ -65,13 +67,14 @@ ui <- navbarPage("Pittsburgh Emergency Request Analysis",
                                 selected = "Website"),
                               
                             ),
-                            # Map Panel
+                            # Panel for barplot
                             mainPanel(
-                              plotlyOutput(outputId = "LinePlot")
+                              plotlyOutput(outputId = "Barplot")
                             )
                           )
                           
                  ),
+                 # Panel for scatterplot
                  tabPanel("Scatterplot for coordinates",
                           sidebarLayout(
                             sidebarPanel(
@@ -82,7 +85,7 @@ ui <- navbarPage("Pittsburgh Emergency Request Analysis",
                                 selected = unique(data$weekday)),
                               
                             ),
-                            # Map Panel
+                            
                             mainPanel(
                               plotlyOutput(outputId = "Scatterplot")
                             )
@@ -92,6 +95,7 @@ ui <- navbarPage("Pittsburgh Emergency Request Analysis",
 )
 server <- function(input, output) {
   
+  ## Download handler 
   output$downloadbutton <- downloadHandler(
     filename = function() {
       paste('data-', Sys.Date(), '.csv', sep = '')
@@ -101,18 +105,20 @@ server <- function(input, output) {
     }
   )
   
+  ## Filter data for scatterplot display
   dataInputs <- reactive({
     dataInf <- data 
     dataInf <- subset(dataInf, weekday %in% input$weekday)
     return(dataInf)
   })
-  
+  ## Filter data for Request Type to display in Barplot
   dataType <- reactive({
     dataInf <- data_agg 
     dataInf <- subset(dataInf, REQUEST_ORIGIN == input$Request_Type)
     return(dataInf)
   })
   
+  ##DataTable output
   output$table<-renderDT(data, options = list(lengthChange = FALSE))
 
   output$Scatterplot<-renderPlotly({
@@ -121,23 +127,22 @@ server <- function(input, output) {
     
   })
   
-  output$Lineplot<-renderPlotly({
+  ## Barplot output
+  output$Barplot<-renderPlotly({
     data_agg=dataType()
     plot_ly(data = data_agg, x =~weekday, y = ~N,type="bar")
     
   })
   
-  
+  ##Map output
   output$leaflet <- renderLeaflet({
-    
-    
-    
+    ## map setup
     leaflet()%>%
       addProviderTiles("OpenStreetMap.HOT")%>%
       setView(-80,40.4,zoom = 10)
   })
   
-  
+  ## Observer for circlemarkers
   observe({
     data=dataInputs()
     data$Selected <- data[[input$Type]]
@@ -149,14 +154,14 @@ server <- function(input, output) {
       addLegend(position = "topright" , pal = pal311, values = data$Selected, title = "REQUEST_ORIGIN")
   })
   
-  
+  ## Observer for police_zone
   observe({
     data=dataInputs()
     data$Selected <- data[[input$Type]]
     pal <- colorNumeric(
       palette = "Purples",
       domain = police_zone$zone)
-    # Data is greenInf
+    ## Only display Polygon when police_zone is chosen
     if(input$Type=="POLICE_ZONE"){
       leafletProxy("leaflet", data = police_zone) %>%
         clearShapes()%>%
